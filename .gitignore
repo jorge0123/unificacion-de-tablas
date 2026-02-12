@@ -48,6 +48,13 @@ coverage.xml
 *.log
 local_settings.py
 
+# Credenciales (NO COMITEAR)
+config/credentials.py
+config/*.pyc
+.env
+.env.local
+.env.*.local
+
 # Flask stuff:
 instance/
 .webassets-cache

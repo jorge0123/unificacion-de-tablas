@@ -92,12 +92,18 @@ class DatabaseManager:
 
     def table_exists(self, table_name: str) -> bool:
         """Verifica si una tabla existe"""
+        # Separar esquema y nombre de tabla
+        if '.' in table_name:
+            schema, table = table_name.split('.')
+        else:
+            schema, table = 'dbo', table_name
+            
         query = (
             "SELECT 1 FROM information_schema.TABLES "
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = 'dbo'"
+            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?"
         )
         try:
-            result = self.execute_query(query, (table_name,))
+            result = self.execute_query(query, (table, schema))
             return len(result) > 0
         except Exception as e:
             logger.error(f"Error verificando tabla: {e}")

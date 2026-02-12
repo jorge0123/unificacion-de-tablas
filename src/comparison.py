@@ -20,13 +20,19 @@ class TableComparator:
 
     def get_table_columns(self, table_name: str) -> List[str]:
         """Obtiene las columnas de una tabla"""
+        # Separar esquema y nombre de tabla
+        if '.' in table_name:
+            schema, table = table_name.split('.')
+        else:
+            schema, table = 'dbo', table_name
+            
         query = (
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = 'dbo' "
+            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? "
             "ORDER BY ORDINAL_POSITION"
         )
         try:
-            results = self.db_manager.execute_query(query, (table_name,))
+            results = self.db_manager.execute_query(query, (table, schema))
             columns = [row[0] for row in results]
             logger.info(f"Columnas de {table_name}: {columns}")
             return columns

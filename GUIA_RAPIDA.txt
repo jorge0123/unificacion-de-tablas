@@ -1,0 +1,279 @@
+"""
+GUÍA RÁPIDA DE INICIO
+Sigue estos pasos para comenzar
+"""
+
+# ============================================================================
+# PASO 1: INSTALACIÓN INICIAL (Una sola vez)
+# ============================================================================
+
+1. Abre terminal en el directorio del proyecto
+
+2. Ejecuta el script de instalación:
+   
+   macOS/Linux:
+   $ bash setup.sh
+   
+   Windows (en PowerShell):
+   $ python -m venv .venv
+   $ .venv\Scripts\activate
+   $ pip install -r requirements.txt
+
+3. Si te falta la conexión a BD, ve al PASO 2
+
+
+# ============================================================================
+# PASO 2: CONFIGURAR CREDENCIALES
+# ============================================================================
+
+1. Abre: config/credentials.py
+
+2. Copia el contenido de CONFIG_EJEMPLO.md
+
+3. Reemplaza con TUS credenciales reales:
+   - server: IP/hostname del SQL Server
+   - database: Nombre de tu BD
+   - username: Tu usuario
+   - password: Tu contraseña
+
+4. Guarda el archivo
+
+IMPORTANTE: No comitear credenciales a Git
+
+
+# ============================================================================
+# PASO 3A: USAR MODO BATCH (Recomendado para Cron Jobs)
+# ============================================================================
+
+Ejecuta el script:
+$ python main.py
+
+Esto:
+✓ Procesa todos los nodos
+✓ Genera logs en logs/app.log
+✓ Termina automáticamente
+
+Ideal para programar en crontab:
+0 */2 * * * cd /ruta/proyecto && python main.py
+
+
+# ============================================================================
+# PASO 3B: USAR MODO SERVIDOR (Recomendado para Consultas En Vivo)
+# ============================================================================
+
+Terminal 1 - Inicia el servidor:
+$ python main-SERVER.py
+
+Deberías ver:
+"Iniciando API Gateway REST Server"
+"Escuchando en 0.0.0.0:5000"
+
+Terminal 2 - Hace consultas (en otra terminal):
+
+1. Health Check:
+   curl http://localhost:5000/api/gateway/health
+
+2. Procesar un nodo:
+   curl "http://localhost:5000/api/gateway/process?nodo=NODO1"
+
+3. Ver estado:
+   curl "http://localhost:5000/api/gateway/status?nodo=NODO1"
+
+4. Listar nodos:
+   curl http://localhost:5000/api/gateway/nodes
+
+
+# ============================================================================
+# PASO 4: TESTING
+# ============================================================================
+
+Con el servidor corriendo (PASO 3B):
+
+Terminal 3 - Ejecuta pruebas:
+$ python test_api_gateway.py
+
+Verás:
+✅ Health Check
+✅ Listar Nodos
+✅ Estado del Nodo
+✅ Procesar Nodo
+✅ Endpoint Inválido
+✅ Parámetro Faltante
+
+
+# ============================================================================
+# MONITOREO Y TROUBLESHOOTING
+# ============================================================================
+
+Revisar logs:
+$ tail -f logs/app.log
+
+Ver estructura de tablas en BD:
+1. Conéctate con SQL Server Management Studio
+2. Consulta tablas en [schema].[tabla]
+
+Verificar conectividad:
+$ python3 << 'EOF'
+import pyodbc
+from config.credentials import DB_CONFIG
+
+try:
+    conn_string = (
+        f"DRIVER={{{DB_CONFIG['driver']}}};"
+        f"SERVER={DB_CONFIG['server']},{DB_CONFIG['port']};"
+        f"DATABASE={DB_CONFIG['database']};"
+        f"UID={DB_CONFIG['username']};"
+        f"PWD={DB_CONFIG['password']};"
+        "Encrypt=yes;TrustServerCertificate=yes;"
+    )
+    conn = pyodbc.connect(conn_string, timeout=5)
+    print("✓ Conexión OK")
+    conn.close()
+except Exception as e:
+    print(f"✗ Error: {e}")
+EOF
+
+
+# ============================================================================
+# CRON JOB - PROGRAMAR EJECUCIÓN AUTOMÁTICA
+# ============================================================================
+
+# Editar crontab:
+$ crontab -e
+
+# Agregar línea para ejecutar cada 2 horas:
+0 */2 * * * cd /ruta/a/proyecto && /usr/bin/python3 main.py >> logs/cron.log 2>&1
+
+# Ver crontabs programados:
+$ crontab -l
+
+
+# ============================================================================
+# DESPLIEGUE EN PRODUCCIÓN
+# ============================================================================
+
+Opción 1: Systemd (Linux)
+   Crear: /etc/systemd/system/api-gateway.service
+   [Unit]
+   Description=API Gateway Service
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=tu_usuario
+   WorkingDirectory=/ruta/proyecto
+   ExecStart=/ruta/proyecto/.venv/bin/python main-SERVER.py
+   Restart=always
+
+   [Install]
+   WantedBy=multi-user.target
+
+   Habilitar:
+   sudo systemctl enable api-gateway
+   sudo systemctl start api-gateway
+
+Opción 2: Screen (Terminal Persistente)
+   screen -S api-gateway
+   python main-SERVER.py
+   Ctrl+A, luego D para desconectar
+   screen -r api-gateway para reconectar
+
+Opción 3: Docker
+   Crear Dockerfile (ver ejemplo en proyecto)
+
+
+# ============================================================================
+# ENDPOINTS PRINCIPALES
+# ============================================================================
+
+BASE_URL: http://localhost:5000
+
+GET /api/gateway/health
+   Verifica servidor activo
+   Respuesta: { success, status, timestamp }
+
+GET /api/gateway/process?nodo=NODO1
+   Procesa un nodo completamente
+   Respuesta: { success, data: [...tickets...] }
+
+GET /api/gateway/status?nodo=NODO1
+   Estadísticas del nodo
+   Respuesta: { success, nodo, total, abiertos, cerrados }
+
+GET /api/gateway/nodes
+   Lista nodos disponibles
+   Respuesta: { success, nodes: [...] }
+
+
+# ============================================================================
+# ESTRUCTURA DE RESPUESTA
+# ============================================================================
+
+Éxito (200):
+{
+  "success": true,
+  "data": [
+    {
+      "Nodo": "NODO1",
+      "Ticket": "INC123",
+      "Tipo": "Falla de conexión",
+      "Estado": "OPEN",
+      "Fecha": "2026-02-12 10:30:00",
+      "Owner": "Técnico1"
+    }
+  ]
+}
+
+Error (400/404/500):
+{
+  "success": false,
+  "error": "Descripción del error"
+}
+
+
+# ============================================================================
+# PARÁMETROS DE CONFIGURACIÓN
+# ============================================================================
+
+Ver en: config/credentials.py
+
+PROCESSING_CONFIG = {
+    "batch_size": 1000,         # Registros por lote
+    "enable_logging": True,      # Activar logs
+    "log_level": "INFO",         # DEBUG, INFO, WARNING, ERROR, CRITICAL
+}
+
+
+# ============================================================================
+# DOCUMENTACIÓN COMPLETA
+# ============================================================================
+
+Ver estos archivos:
+1. DOCUMENTACION_API_GATEWAY.md - Documentación técnica completa
+2. CONFIG_EJEMPLO.md - Ejemplos de configuración
+3. RESUMEN_IMPLEMENTACION.md - Resumen de todo lo implementado
+
+
+# ============================================================================
+# SOPORTE Y PREGUNTAS
+# ============================================================================
+
+¿Error de conexión?
+   → Revisar credenciales en config/credentials.py
+   → Verificar que ODBC Driver 17 esté instalado
+   → Confirmar permisos en BD
+
+¿No se procesan datos?
+   → Revisar logs/app.log
+   → Verificar que las tablas existan en BD
+   → Confirmar permisos de UPDATE, INSERT, MERGE
+
+¿Puerto 5000 en uso?
+   → Cambiar puerto en main-SERVER.py línea final
+   → O: lsof -i :5000 para ver qué lo usa
+
+
+# ============================================================================
+
+Listo para comenzar. ¿Alguna pregunta?
+Lee la documentación completa en DOCUMENTACION_API_GATEWAY.md
