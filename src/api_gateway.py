@@ -1,12 +1,15 @@
 """
 API Gateway - Motor Integrado y Seguro
 Implementa la lógica de sincronización entre tablas de forma segura y eficiente
+CON OPTIMIZACIÓN: Caché inteligente y checksums para evitar re-procesamiento
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 from src.database import DatabaseManager
+from src.optimizacion import SyncCache, ComparadorOptimizado, MonitorOptimizacion
 from config.credentials import TABLES_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -18,6 +21,10 @@ class APIGateway:
     def __init__(self):
         self.db_manager = DatabaseManager()
         self.config = TABLES_CONFIG
+        # Inicializar sistemas de optimización
+        self.cache = SyncCache(self.db_manager)
+        self.comparador = ComparadorOptimizado(self.db_manager, self.cache)
+        self.monitor = MonitorOptimizacion()
 
     def process_node(self, nodo: str) -> Dict[str, Any]:
         """
@@ -88,6 +95,42 @@ class APIGateway:
                 logger.info("Sincronización de carga automática completada")
             except Exception as e:
                 logger.error(f"Error en sincronización B->C: {e}")
+            # PASO 3.1: Cerrar tickets si Status es CLOSED o RESOLVED
+            logger.info("PASO 3.1: Marcando como cerrados por Status")
+
+            close_by_status = """
+                UPDATE C
+                SET C.Fecha_Cierre = GETDATE(),
+                    C.Ultima_Actualizacion = GETDATE()
+                FROM [tigostar].[homeb2c_consolidado] C
+                INNER JOIN [tigostar].[homeb2c_tiv] SRC
+                    ON C.Incident = SRC.Incident
+                WHERE C.Fecha_Cierre IS NULL
+                AND UPPER(ISNULL(SRC.Status, C.Status)) IN ('CLOSED','RESOLVED')
+            """
+            try:
+                self._execute_update(close_by_status)
+            except Exception as e:
+                logger.error(f"Error cerrando por Status: {e}")
+            
+            # PASO 3.2: Reabrir tickets si ya no están CLOSED ni RESOLVED
+            logger.info("PASO 3.2: Reabriendo tickets si cambiaron de estado")
+
+            reopen_by_status = """
+                UPDATE C
+                SET C.Fecha_Cierre = NULL,
+                    C.Ultima_Actualizacion = GETDATE()
+                FROM [tigostar].[homeb2c_consolidado] C
+                INNER JOIN [TStest].[tigostar].[homeb2c_tiv] SRC
+                    ON C.Incident = SRC.Incident
+                WHERE C.Fecha_Cierre IS NOT NULL
+                AND UPPER(ISNULL(SRC.Status,'')) NOT IN ('CLOSED','RESOLVED')
+            """
+            try:
+                self._execute_update(reopen_by_status)
+            except Exception as e:
+                logger.error(f"Error reabriendo por Status: {e}")
+
 
             # PASO 4: Prioridad Gestión de Equipo (A -> C)
             # La gestión manual de equipo tiene prioridad
@@ -140,15 +183,18 @@ class APIGateway:
             # PASO 6: Consulta Final - Retornar datos
             logger.info(f"PASO 6: Obteniendo datos finales para nodo {nodo}")
             sql_data = """
-                SELECT Nodo, 
-                       Incident AS Ticket, 
-                       Summary AS Tipo, 
-                       Status AS Estado, 
-                       Reported_Date AS Fecha, 
-                       Owner 
-                FROM [tigostar].[homeb2c_consolidado] 
-                WHERE Nodo = ? AND Fecha_Cierre IS NULL
+                SELECT Nodo,
+                    Incident AS Ticket,
+                    Summary AS Tipo,
+                    Status AS Estado,
+                    Reported_Date AS Fecha,
+                    Owner
+                FROM [tigostar].[homeb2c_consolidado]
+                WHERE Nodo = ?
+                AND Fecha_Cierre IS NULL
+                AND UPPER(ISNULL(Status,'')) NOT IN ('CLOSED','RESOLVED')
             """
+
             try:
                 results = self.db_manager.execute_query(sql_data, (nodo,))
                 for row in results:
@@ -317,3 +363,66 @@ class APIGateway:
         except Exception as e:
             logger.error(f"Error en comparación de nodos: {e}")
             return {"success": False, "error": str(e)}
+
+    def process_node_optimizado(self, nodo: str) -> Dict[str, Any]:
+        """
+        Procesa un nodo usando CACHÉ INTELIGENTE
+        - Si no cambió desde último procesamiento: retorna desde caché (RÁPIDO)
+        - Si cambió: procesa solo cambios recientes (OPTIMIZADO)
+        """
+        inicio = time.time()
+        response = {"success": True, "data": [], "optimizacion": {}}
+        
+        if not nodo or not nodo.strip():
+            return {"success": False, "error": "Nodo vacio"}
+        
+        try:
+            # PASO 0: Verificar caché inteligentemente
+            logger.info(f"PASO 0 (OPTIMIZACIÓN): Verificando caché para {nodo}")
+            
+            resultado_comparacion = self.comparador.comparar_optimizado(
+                nodo, "homeb2c_tck", "homeb2c_tiv"
+            )
+            
+            response['optimizacion'] = {
+                'desde_cache': resultado_comparacion.get('desde_cache', False),
+                'razon': resultado_comparacion.get('razon', ''),
+                'tiempo_ahorrado': 'sí' if resultado_comparacion.get('desde_cache') else 'no'
+            }
+            
+            # Si está en caché y sin cambios, retornar directamente
+            if resultado_comparacion.get('desde_cache'):
+                tiempo_total = time.time() - inicio
+                response['optimizacion']['tiempo_ms'] = int(tiempo_total * 1000)
+                logger.info(f"✓ Procesamiento de {nodo} desde caché en {tiempo_total:.2f}s")
+                self.monitor.registrar_comparacion(True, tiempo_total)
+                return response
+            
+            # Si necesita reprocesar, ejecutar los 6 pasos normales
+            logger.info(f"⚠ Necesario reprocesar {nodo} - ejecutando 6 pasos")
+            
+            # Ejecutar los 6 pasos normales pero ahora los datos ya fueron validados
+            response_normal = self.process_node(nodo)
+            response['data'] = response_normal.get('data', [])
+            response['success'] = response_normal.get('success', False)
+            
+            tiempo_total = time.time() - inicio
+            response['optimizacion']['tiempo_ms'] = int(tiempo_total * 1000)
+            self.monitor.registrar_comparacion(False, tiempo_total)
+            
+            logger.info(f"Procesamiento de {nodo} completado en {tiempo_total:.2f}s")
+            
+        except Exception as e:
+            logger.error(f"Error en procesamiento optimizado: {e}")
+            response["success"] = False
+            response["error"] = str(e)
+        
+        return response
+    
+    def get_optimization_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas de optimización"""
+        return {
+            'success': True,
+            'estadisticas': self.monitor.reporte()
+        }
+

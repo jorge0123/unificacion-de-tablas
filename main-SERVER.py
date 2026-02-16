@@ -106,36 +106,29 @@ def process_all():
         for nodo in nodos:
             logger.info(f"Procesando nodo automático: {nodo}")
             try:
-                result = gateway.process_node(nodo)
-                
+                result = gateway.process_node_optimizado(nodo)
                 nodo_info = {
                     'nodo': nodo,
                     'success': result['success'],
-                    'registros': len(result.get('data', []))
+                    'registros': len(result.get('data', [])),
+                    'optimizacion': result.get('optimizacion', {})
                 }
-                
                 if result['success']:
                     resultados['procesados'] += 1
                     nodo_info['status'] = 'procesado'
                 else:
                     resultados['errores'] += 1
                     nodo_info['status'] = 'error'
-                    nodo_info['error'] = result.get('error', 'Error desconocido')
-                
                 resultados['nodos'].append(nodo_info)
-                
             except Exception as e:
                 logger.error(f"Error procesando nodo {nodo}: {e}")
                 resultados['errores'] += 1
                 resultados['nodos'].append({
                     'nodo': nodo,
                     'success': False,
-                    'status': 'error',
-                    'error': str(e)
+                    'error': str(e),
+                    'status': 'error'
                 })
-        
-        resultados['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        logger.info(f"Procesamiento automático completado: {resultados['procesados']}/{resultados['total_nodos']} exitosos")
         
         return jsonify(resultados), 200 if resultados['errores'] == 0 else 206
     
@@ -214,6 +207,25 @@ def health_check():
         'status': 'online',
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }), 200
+
+
+@app.route('/api/gateway/stats', methods=['GET'])
+def get_stats():
+    """
+    Endpoint: GET /api/gateway/stats
+    Obtiene estadísticas de optimización (caché, checksums, tiempo ahorrado)
+    """
+    try:
+        logger.info("Obteniendo estadísticas de optimización")
+        stats = gateway.get_optimization_stats()
+        return jsonify(stats), 200
+    
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/gateway/nodes', methods=['GET'])
