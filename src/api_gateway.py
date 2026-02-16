@@ -215,3 +215,105 @@ class APIGateway:
             logger.error(f"Error obteniendo estado del nodo: {e}")
         
         return {"success": False, "error": "No se pudo obtener estado del nodo"}
+
+    def get_all_nodes_from_database(self) -> List[str]:
+        """
+        Busca dinámicamente todos los nodos únicos de las tablas reales (A, B, C)
+        Retorna una lista de nodos que existen en los datos
+        """
+        nodos_unicos = set()
+        
+        try:
+            # Obtener nodos de Tabla A (TCK)
+            logger.info("Buscando nodos en Tabla A (TCK)...")
+            query_a = """
+                SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_tck]
+                WHERE Nodo IS NOT NULL
+            """
+            resultados_a = self.db_manager.execute_query(query_a)
+            if resultados_a:
+                for row in resultados_a:
+                    if row[0]:
+                        nodos_unicos.add(row[0].strip())
+                logger.info(f"Encontrados {len([r for r in resultados_a])} nodos únicos en Tabla A")
+            
+            # Obtener nodos de Tabla B (TIV)
+            logger.info("Buscando nodos en Tabla B (TIV)...")
+            query_b = """
+                SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_tiv]
+                WHERE Nodo IS NOT NULL
+            """
+            resultados_b = self.db_manager.execute_query(query_b)
+            if resultados_b:
+                for row in resultados_b:
+                    if row[0]:
+                        nodos_unicos.add(row[0].strip())
+                logger.info(f"Encontrados {len([r for r in resultados_b])} nodos únicos en Tabla B")
+            
+            # Obtener nodos de Tabla C (Consolidado)
+            logger.info("Buscando nodos en Tabla C (Consolidado)...")
+            query_c = """
+                SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_consolidado]
+                WHERE Nodo IS NOT NULL
+            """
+            resultados_c = self.db_manager.execute_query(query_c)
+            if resultados_c:
+                for row in resultados_c:
+                    if row[0]:
+                        nodos_unicos.add(row[0].strip())
+                logger.info(f"Encontrados {len([r for r in resultados_c])} nodos únicos en Tabla C")
+            
+            # Retornar lista ordenada de nodos únicos
+            nodos_finales = sorted(list(nodos_unicos))
+            logger.info(f"TOTAL: {len(nodos_finales)} nodos únicos encontrados: {nodos_finales}")
+            
+            return nodos_finales
+            
+        except Exception as e:
+            logger.error(f"Error buscando nodos: {e}")
+            return []
+
+    def get_nodes_comparison(self) -> Dict[str, Any]:
+        """
+        Compara qué nodos existen en cada tabla
+        Retorna un diccionario mostrando la distribución de nodos
+        """
+        try:
+            nodos_a = set()
+            nodos_b = set()
+            nodos_c = set()
+            
+            # Tabla A
+            query_a = "SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_tck] WHERE Nodo IS NOT NULL"
+            resultados_a = self.db_manager.execute_query(query_a)
+            if resultados_a:
+                nodos_a = {row[0].strip() for row in resultados_a if row[0]}
+            
+            # Tabla B
+            query_b = "SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_tiv] WHERE Nodo IS NOT NULL"
+            resultados_b = self.db_manager.execute_query(query_b)
+            if resultados_b:
+                nodos_b = {row[0].strip() for row in resultados_b if row[0]}
+            
+            # Tabla C
+            query_c = "SELECT DISTINCT Nodo FROM [tigostar].[homeb2c_consolidado] WHERE Nodo IS NOT NULL"
+            resultados_c = self.db_manager.execute_query(query_c)
+            if resultados_c:
+                nodos_c = {row[0].strip() for row in resultados_c if row[0]}
+            
+            return {
+                "success": True,
+                "tabla_a_tck": sorted(list(nodos_a)),
+                "tabla_b_tiv": sorted(list(nodos_b)),
+                "tabla_c_consolidado": sorted(list(nodos_c)),
+                "todos_unicos": sorted(list(nodos_a | nodos_b | nodos_c)),
+                "solo_en_a": sorted(list(nodos_a - nodos_b - nodos_c)),
+                "solo_en_b": sorted(list(nodos_b - nodos_a - nodos_c)),
+                "solo_en_c": sorted(list(nodos_c - nodos_a - nodos_b)),
+                "en_a_y_b": sorted(list((nodos_a & nodos_b) - nodos_c)),
+                "en_todas": sorted(list(nodos_a & nodos_b & nodos_c)),
+                "total_unicos": len(nodos_a | nodos_b | nodos_c)
+            }
+        except Exception as e:
+            logger.error(f"Error en comparación de nodos: {e}")
+            return {"success": False, "error": str(e)}
